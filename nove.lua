@@ -22,7 +22,7 @@
 		SECTION: PUBLIC API
 
 	Pemakaian dasar:
-		local NovaUI = loadstring(game:HttpGet("...NovaUI.lua"))()
+		local NovaUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/kjbookk-prog/Novalaunch/refs/heads/main/nove.lua"))()
 		local Window = NovaUI:CreateWindow({
 			Title = "Oxyo",
 			SubTitle = "Premium Hub",
