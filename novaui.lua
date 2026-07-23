@@ -22,7 +22,7 @@
 		SECTION: PUBLIC API
 
 	Pemakaian dasar:
-		local NovaUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/kjbookk-prog/Novalaunch/refs/heads/main/nove.lua"))()
+		local NovaUI = loadstring(game:HttpGet("...NovaUI.lua"))()
 		local Window = NovaUI:CreateWindow({
 			Title = "Oxyo",
 			SubTitle = "Premium Hub",
@@ -1317,5 +1317,671 @@ function Components.CreateParagraph(parent, theme, opts)
 end
 
 NovaUI._Components = Components
+
+--====================================================================
+-- SECTION: SECTION (wrapper yang mengelompokkan komponen dalam sebuah Tab)
+--====================================================================
+local SectionObj = {}
+SectionObj.__index = SectionObj
+
+local function newSection(parent, theme, title, registry)
+	local self = setmetatable({}, SectionObj)
+	self.Theme = theme
+	self.Registry = registry -- dipakai fitur search global
+
+	self.Holder = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Parent = parent,
+	})
+	Util.Create("UIListLayout", {
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = self.Holder,
+	})
+
+	if title then
+		Components.CreateSectionHeader(self.Holder, theme, title)
+	end
+
+	return self
+end
+
+local function registerSearchable(self, title, instance)
+	if self.Registry and title then
+		table.insert(self.Registry, { Title = title:lower(), Instance = instance })
+	end
+end
+
+function SectionObj:CreateButton(opts)
+	local c = Components.CreateButton(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateToggle(opts)
+	local c = Components.CreateToggle(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateSlider(opts)
+	local c = Components.CreateSlider(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateDropdown(opts)
+	local c = Components.CreateDropdown(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateTextbox(opts)
+	local c = Components.CreateTextbox(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateColorPicker(opts)
+	local c = Components.CreateColorPicker(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateKeybind(opts)
+	local c = Components.CreateKeybind(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+function SectionObj:CreateLabel(opts)
+	return Components.CreateLabel(self.Holder, self.Theme, opts)
+end
+
+function SectionObj:CreateParagraph(opts)
+	local c = Components.CreateParagraph(self.Holder, self.Theme, opts)
+	registerSearchable(self, opts and opts.Title, c.Instance)
+	return c
+end
+
+NovaUI._Section = SectionObj
+
+--====================================================================
+-- SECTION: TAB
+-- Setiap Tab merepresentasikan satu "card" di sidebar + satu halaman
+-- konten di panel kanan. Window yang mengatur perpindahan antar-tab.
+--====================================================================
+local TabObj = {}
+TabObj.__index = TabObj
+
+function TabObj:CreateSection(title)
+	return newSection(self.Page, self.Theme, title, self.Window.SearchRegistry)
+end
+
+NovaUI._Tab = TabObj
+
+--====================================================================
+-- SECTION: WINDOW
+--====================================================================
+local Window = {}
+Window.__index = Window
+
+function Window.new(opts)
+	opts = opts or {}
+	local themeName = opts.Theme or "Default"
+	local theme = NovaUI.Themes[themeName] or NovaUI.Themes.Default
+
+	local self = setmetatable({}, Window)
+	self.Theme = theme
+	self.Tabs = {}
+	self.SearchRegistry = {}
+	self.Config = Config.new(opts.ConfigName or (opts.Title or "NovaUI") .. "_Config")
+
+	-- Root ScreenGui
+	local gui = Util.Create("ScreenGui", {
+		Name = "NovaUI_" .. (opts.Title or "Window"),
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		IgnoreGuiInset = true,
+	})
+	local ok = pcall(function()
+		gui.Parent = (gethui and gethui()) or PlayerGui
+	end)
+	if not ok then gui.Parent = PlayerGui end
+	self.Gui = gui
+
+	-- Root window frame
+	local root = Util.Create("Frame", {
+		Name = "Root",
+		BackgroundColor3 = theme.Background,
+		Size = UDim2.new(0, opts.Width or 920, 0, opts.Height or 560),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		ClipsDescendants = true,
+		Parent = gui,
+	})
+	Util.Corner(root, 14)
+	Util.Stroke(root, theme.Stroke, 1)
+	Util.Shadow(root, 0.4, 80)
+	self.Root = root
+
+	if IS_MOBILE then
+		root.Size = UDim2.new(0.95, 0, 0.85, 0)
+	end
+
+	Util.Resizify(root, Vector2.new(640, 420), Vector2.new(1500, 950))
+
+	--------------------------------------------------------------
+	-- SIDEBAR (kiri)
+	--------------------------------------------------------------
+	local sidebarWidth = 240
+	local sidebar = Util.Create("Frame", {
+		Name = "Sidebar",
+		BackgroundColor3 = theme.PanelPrimary,
+		Size = UDim2.new(0, sidebarWidth, 1, 0),
+		Parent = root,
+	})
+	self.Sidebar = sidebar
+	self.SidebarWidth = sidebarWidth
+	self.SidebarCollapsed = false
+
+	-- Logo + nama app
+	local brand = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 64),
+		Parent = sidebar,
+	})
+	local logo = Util.Create("Frame", {
+		BackgroundColor3 = theme.Accent,
+		Size = UDim2.new(0, 34, 0, 34),
+		Position = UDim2.new(0, 16, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Parent = brand,
+	})
+	Util.Corner(logo, 9)
+	Util.Gradient(logo, ColorSequence.new(theme.Accent, theme.AccentGradient), 45)
+	Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = (opts.Title or "N"):sub(1, 1):upper(),
+		Font = theme.FontBold,
+		TextSize = 16,
+		TextColor3 = Color3.new(1, 1, 1),
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = logo,
+	})
+
+	local brandText = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -66, 1, 0),
+		Position = UDim2.new(0, 60, 0, 0),
+		Parent = brand,
+	})
+	Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = opts.Title or "NovaUI",
+		Font = theme.FontBold,
+		TextSize = 15,
+		TextColor3 = theme.TextPrimary,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0.5, 0),
+		Parent = brandText,
+	})
+	Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = opts.SubTitle or "Premium Hub",
+		Font = theme.Font,
+		TextSize = 11,
+		TextColor3 = theme.Success,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0.5, 0),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Parent = brandText,
+	})
+	self.BrandFrame = brandText
+
+	Util.Draggify(root, brand)
+
+	-- Tombol collapse sidebar
+	local collapseBtn = Util.Create("TextButton", {
+		BackgroundTransparency = 1,
+		Text = "≡",
+		Font = theme.FontBold,
+		TextSize = 18,
+		TextColor3 = theme.TextSecondary,
+		Size = UDim2.new(0, 28, 0, 28),
+		Position = UDim2.new(1, -34, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Parent = brand,
+	})
+
+	-- Daftar tab (card list) dengan scroll otomatis
+	local tabList = Util.Create("ScrollingFrame", {
+		Name = "TabList",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, -140),
+		Position = UDim2.new(0, 0, 0, 72),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = theme.Accent,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = sidebar,
+	})
+	Util.Padding(tabList, 0, 12, 12, 0, 8)
+	Util.Create("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tabList,
+	})
+	self.TabList = tabList
+
+	collapseBtn.MouseButton1Click:Connect(function()
+		self:ToggleSidebar()
+	end)
+
+	-- Footer sidebar: discord / social + user tag (opsional, sesuai referensi)
+	if opts.Footer then
+		local footer = Util.Create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 64),
+			Position = UDim2.new(0, 0, 1, -64),
+			Parent = sidebar,
+		})
+		Util.Create("UIListLayout", {
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = footer,
+		})
+		Util.Padding(footer, 12)
+		for i, line in ipairs(opts.Footer) do
+			local row = Util.Create("Frame", {
+				BackgroundColor3 = theme.PanelSecondary,
+				Size = UDim2.new(1, 0, 0, 26),
+				LayoutOrder = i,
+				Parent = footer,
+			})
+			Util.Corner(row, 8)
+			Util.Create("TextLabel", {
+				BackgroundTransparency = 1,
+				Text = line,
+				Font = theme.Font,
+				TextSize = 11,
+				TextColor3 = theme.TextSecondary,
+				Size = UDim2.new(1, -10, 1, 0),
+				Position = UDim2.new(0, 8, 0, 0),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = row,
+			})
+		end
+	end
+
+	--------------------------------------------------------------
+	-- CONTENT PANEL (kanan)
+	--------------------------------------------------------------
+	local content = Util.Create("Frame", {
+		Name = "Content",
+		BackgroundColor3 = theme.Background,
+		Size = UDim2.new(1, -sidebarWidth, 1, 0),
+		Position = UDim2.new(0, sidebarWidth, 0, 0),
+		Parent = root,
+	})
+	self.Content = content
+
+	-- Topbar: search, close
+	local topbar = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 56),
+		Parent = content,
+	})
+	Util.Padding(topbar, 0, 24, 24, 12, 0)
+
+	local searchBox = Util.Create("Frame", {
+		BackgroundColor3 = theme.PanelSecondary,
+		Size = UDim2.new(0, 240, 0, 32),
+		Position = UDim2.new(1, -276, 0, 0),
+		Parent = topbar,
+	})
+	Util.Corner(searchBox, 8)
+	Util.Stroke(searchBox, theme.Stroke, 1)
+	local searchInput = Util.Create("TextBox", {
+		BackgroundTransparency = 1,
+		PlaceholderText = "Search...",
+		Text = "",
+		Font = theme.Font,
+		TextSize = 12,
+		TextColor3 = theme.TextPrimary,
+		PlaceholderColor3 = theme.TextTertiary,
+		ClearTextOnFocus = false,
+		Size = UDim2.new(1, -16, 1, 0),
+		Position = UDim2.new(0, 10, 0, 0),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = searchBox,
+	})
+	self.SearchInput = searchInput
+
+	local closeBtn = Util.Create("TextButton", {
+		BackgroundColor3 = theme.PanelSecondary,
+		Size = UDim2.new(0, 32, 0, 32),
+		Position = UDim2.new(1, -32, 0, 0),
+		Text = "✕",
+		Font = theme.FontBold,
+		TextSize = 14,
+		TextColor3 = theme.TextSecondary,
+		AutoButtonColor = false,
+		Parent = topbar,
+	})
+	Util.Corner(closeBtn, 8)
+	Util.Hover(closeBtn, theme.PanelSecondary, theme.Error)
+	closeBtn.MouseButton1Click:Connect(function() self:Close() end)
+
+	local minimizeBtn = Util.Create("TextButton", {
+		BackgroundColor3 = theme.PanelSecondary,
+		Size = UDim2.new(0, 32, 0, 32),
+		Position = UDim2.new(1, -70, 0, 0),
+		Text = "–",
+		Font = theme.FontBold,
+		TextSize = 16,
+		TextColor3 = theme.TextSecondary,
+		AutoButtonColor = false,
+		Parent = topbar,
+	})
+	Util.Corner(minimizeBtn, 8)
+	Util.Hover(minimizeBtn, theme.PanelSecondary, theme.PanelHover)
+	minimizeBtn.MouseButton1Click:Connect(function() self:ToggleMinimize() end)
+
+	-- Judul halaman + subtitle + status
+	local header = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0, 56),
+		Parent = content,
+	})
+	Util.Padding(header, 0, 24, 24, 0, 0)
+
+	local pageTitle = Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = theme.FontBold,
+		TextSize = 26,
+		TextColor3 = theme.TextPrimary,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(0.6, 0, 0, 32),
+		Parent = header,
+	})
+	local pageSubtitle = Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = theme.Font,
+		TextSize = 13,
+		TextColor3 = theme.TextSecondary,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(0.6, 0, 0, 18),
+		Position = UDim2.new(0, 0, 0, 32),
+		Parent = header,
+	})
+
+	local statusRow = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 120, 0, 16),
+		Position = UDim2.new(1, -120, 0, 4),
+		Parent = header,
+	})
+	local statusDot = Util.Create("Frame", {
+		BackgroundColor3 = theme.Success,
+		Size = UDim2.new(0, 8, 0, 8),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Parent = statusRow,
+	})
+	Util.Corner(statusDot, 999)
+	local statusLabel = Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = "ONLINE",
+		Font = theme.FontSemibold,
+		TextSize = 11,
+		TextColor3 = theme.Success,
+		Size = UDim2.new(1, -14, 1, 0),
+		Position = UDim2.new(0, 14, 0, 0),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = statusRow,
+	})
+
+	self.PageTitle, self.PageSubtitle = pageTitle, pageSubtitle
+	self.StatusDot, self.StatusLabel = statusDot, statusLabel
+
+	-- Container halaman (tempat semua Tab.Page berada, hanya 1 yang Visible)
+	local pageContainer = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, -128),
+		Position = UDim2.new(0, 0, 0, 120),
+		Parent = content,
+	})
+	self.PageContainer = pageContainer
+
+	-- Notification & Dialog subsystem
+	self.Notifications = Notification.new(gui, theme)
+	self.Dialogs = Dialog.new(gui, theme)
+
+	-- Watermark (opsional)
+	if opts.Watermark ~= false then
+		local watermark = Util.Create("TextLabel", {
+			BackgroundColor3 = theme.PanelSecondary,
+			Text = "  " .. (opts.Title or "NovaUI") .. "  ",
+			Font = theme.FontSemibold,
+			TextSize = 12,
+			TextColor3 = theme.TextSecondary,
+			Size = UDim2.new(0, 0, 0, 26),
+			AutomaticSize = Enum.AutomaticSize.X,
+			Position = UDim2.new(0, 16, 0, 16),
+			Parent = gui,
+		})
+		Util.Corner(watermark, 8)
+		Util.Stroke(watermark, theme.Stroke, 1)
+		self.Watermark = watermark
+	end
+
+	-- Realtime search: filter card komponen berdasarkan judul
+	searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+		local query = searchInput.Text:lower()
+		for _, entry in ipairs(self.SearchRegistry) do
+			local matches = query == "" or entry.Title:find(query, 1, true) ~= nil
+			entry.Instance.Visible = matches
+		end
+	end)
+
+	self.Minimized = false
+	self.PrevSize = root.Size
+
+	return self
+end
+
+function Window:ToggleSidebar()
+	self.SidebarCollapsed = not self.SidebarCollapsed
+	local target = self.SidebarCollapsed and 72 or self.SidebarWidth
+	Util.QuickTween(self.Sidebar, { Size = UDim2.new(0, target, 1, 0) }, 0.25)
+	Util.QuickTween(self.Content, {
+		Size = UDim2.new(1, -target, 1, 0),
+		Position = UDim2.new(0, target, 0, 0),
+	}, 0.25)
+	Util.QuickTween(self.BrandFrame, { GroupTransparency = self.SidebarCollapsed and 1 or 0 }, 0.2)
+	self.BrandFrame.Visible = not self.SidebarCollapsed
+	for _, tab in pairs(self.Tabs) do
+		if tab.LabelHolder then
+			tab.LabelHolder.Visible = not self.SidebarCollapsed
+		end
+	end
+end
+
+function Window:ToggleMinimize()
+	self.Minimized = not self.Minimized
+	if self.Minimized then
+		self.PrevSize = self.Root.Size
+		Util.QuickTween(self.Root, { Size = UDim2.new(0, self.Root.AbsoluteSize.X, 0, 56) }, 0.25)
+	else
+		Util.QuickTween(self.Root, { Size = self.PrevSize }, 0.25)
+	end
+end
+
+function Window:Close()
+	Util.QuickTween(self.Root, { Size = UDim2.new(self.Root.Size.X.Scale, self.Root.Size.X.Offset, 0, 0) }, 0.25)
+	task.delay(0.25, function()
+		self.Gui.Enabled = false
+	end)
+end
+
+function Window:Notify(opts)
+	return self.Notifications:Push(opts)
+end
+
+function Window:Dialog(opts)
+	return self.Dialogs:Open(opts)
+end
+
+function Window:CreateTab(opts)
+	opts = opts or {}
+	local theme = self.Theme
+
+	-- Card di sidebar
+	local card = Util.Create("TextButton", {
+		BackgroundColor3 = theme.PanelSecondary,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 56),
+		Text = "",
+		AutoButtonColor = false,
+		Parent = self.TabList,
+	})
+	Util.Corner(card, 10)
+	local activeBar = Util.Create("Frame", {
+		BackgroundColor3 = theme.Accent,
+		Size = UDim2.new(0, 3, 0, 0),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Parent = card,
+	})
+	Util.Corner(activeBar, 2)
+
+	local iconHolder = Util.Create("Frame", {
+		BackgroundColor3 = theme.PanelTertiary,
+		Size = UDim2.new(0, 36, 0, 36),
+		Position = UDim2.new(0, 10, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Parent = card,
+	})
+	Util.Corner(iconHolder, 8)
+	Util.Create("ImageLabel", {
+		BackgroundTransparency = 1,
+		Image = opts.Icon and NovaUI:GetIcon(opts.Icon) or "",
+		ImageColor3 = theme.TextSecondary,
+		Size = UDim2.new(0, 18, 0, 18),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Parent = iconHolder,
+	})
+
+	local labelHolder = Util.Create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -66, 1, 0),
+		Position = UDim2.new(0, 56, 0, 0),
+		Parent = card,
+	})
+	Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = opts.Title or "Tab",
+		Font = theme.FontSemibold,
+		TextSize = 13,
+		TextColor3 = theme.TextPrimary,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0.55, 0),
+		Parent = labelHolder,
+	})
+	Util.Create("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = opts.Subtitle or "",
+		Font = theme.Font,
+		TextSize = 11,
+		TextColor3 = theme.TextTertiary,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0.45, 0),
+		Position = UDim2.new(0, 0, 0.55, 0),
+		Parent = labelHolder,
+	})
+	Util.Create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, VerticalAlignment = Enum.VerticalAlignment.Center, Parent = labelHolder })
+
+	card.MouseEnter:Connect(function()
+		if self.ActiveTab ~= card then
+			Util.QuickTween(card, { BackgroundTransparency = 0 }, 0.15)
+		end
+	end)
+	card.MouseLeave:Connect(function()
+		if self.ActiveTab ~= card then
+			Util.QuickTween(card, { BackgroundTransparency = 1 }, 0.15)
+		end
+	end)
+
+	-- Halaman konten milik tab ini
+	local page = Util.Create("ScrollingFrame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = theme.Accent,
+		Visible = false,
+		Parent = self.PageContainer,
+	})
+	Util.Padding(page, 0, 24, 24, 0, 24)
+	Util.Create("UIListLayout", {
+		Padding = UDim.new(0, 14),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = page,
+	})
+
+	local tabObj = setmetatable({
+		Window = self,
+		Theme = theme,
+		Page = page,
+		Card = card,
+		LabelHolder = labelHolder,
+		ActiveBarInst = activeBar,
+		Title = opts.Title,
+		Subtitle = opts.Subtitle,
+	}, TabObj)
+
+	table.insert(self.Tabs, tabObj)
+
+	card.MouseButton1Click:Connect(function()
+		self:SelectTab(tabObj)
+	end)
+
+	-- Tab pertama otomatis aktif
+	if #self.Tabs == 1 then
+		self:SelectTab(tabObj)
+	end
+
+	return tabObj
+end
+
+function Window:SelectTab(tabObj)
+	for _, t in ipairs(self.Tabs) do
+		local isActive = t == tabObj
+		t.Page.Visible = isActive
+		Util.QuickTween(t.Card, { BackgroundTransparency = isActive and 0 or 1 }, 0.2)
+		Util.QuickTween(t.ActiveBarInst, { Size = UDim2.new(0, 3, 0, isActive and 28 or 0) }, 0.2)
+	end
+	self.ActiveTab = tabObj.Card
+	self.PageTitle.Text = tabObj.Title or ""
+	self.PageSubtitle.Text = tabObj.Subtitle or ""
+end
+
+NovaUI._Window = Window
+
+--====================================================================
+-- SECTION: PUBLIC API
+--====================================================================
+function NovaUI:CreateWindow(opts)
+	return Window.new(opts)
+end
 
 return NovaUI
